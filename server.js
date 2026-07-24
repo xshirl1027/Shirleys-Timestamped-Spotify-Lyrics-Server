@@ -112,7 +112,8 @@ async function createServer() {
     res.json({ ok: true });
   });
 
-  app.get("/lyrics", async (req, res) => {
+  // Dedicated fetch and cache endpoint
+  app.get("/lyrics/fetch", async (req, res) => {
     const spotifyTrackId = String(req.query.spotifyTrackId || "").trim();
     const artistNames = String(req.query.artistNames || "").trim();
     const songName = String(req.query.songName || "").trim();
@@ -126,17 +127,6 @@ async function createServer() {
     }
 
     try {
-      const existing = await db.get(
-        "SELECT syncedLyricsString FROM lyrics_cache WHERE spotifyTrackId = ?",
-        [spotifyTrackId],
-      );
-
-      if (existing) {
-        return res.json({
-          syncedLyrics: existing.syncedLyricsString,
-        });
-      }
-
       const firstTry = await fetchFromLrclib({
         artistName: artistNames,
         songName,
@@ -208,6 +198,55 @@ async function createServer() {
         source: "lrclib",
         message: "No synced lyrics found",
       });
+    } catch (error) {
+      return res.status(500).json({
+        error: "Internal server error",
+        details: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  // Main lyrics endpoint that checks cache and calls the fetch endpoint if needed
+  app.get("/lyrics", async (req, res) => {
+    const spotifyTrackId = String(req.query.spotifyTrackId || "").trim();
+    const artistNames = String(req.query.artistNames || "").trim();
+    const songName = String(req.query.songName || "").trim();
+    const albumName = String(req.query.albumName || "").trim();
+
+    if (!spotifyTrackId || !artistNames || !songName || !albumName) {
+      return res.status(400).json({
+        error:
+          "Missing required query params: spotifyTrackId, artistNames, songName, albumName",
+      });
+    }
+
+    try {
+      // 1. Check local SQLite cache first
+      const existing = await db.get(
+        "SELECT syncedLyricsString FROM lyrics_cache WHERE spotifyTrackId = ?",
+        [spotifyTrackId],
+      );
+
+      if (existing) {
+        return res.json({
+          syncedLyrics: existing.syncedLyricsString,
+        });
+      }
+
+      // 2. Cache miss: Call the separate fetch endpoint internally
+      // Adjust the base URL/port if your server runs on a different port or host
+      const protocol = req.protocol;
+      const host = req.get("host");
+      const fetchUrl = `${protocol}://${host}/lyrics/fetch?spotifyTrackId=${encodeURIComponent(spotifyTrackId)}&artistNames=${encodeURIComponent(artistNames)}&songName=${encodeURIComponent(songName)}&albumName=${encodeURIComponent(albumName)}`;
+
+      const fetchResponse = await fetch(fetchUrl);
+      const fetchData = await fetchResponse.json();
+
+      if (!fetchResponse.ok) {
+        return res.status(fetchResponse.status).json(fetchData);
+      }
+
+      return res.json(fetchData);
     } catch (error) {
       return res.status(500).json({
         error: "Internal server error",
