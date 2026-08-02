@@ -12,191 +12,137 @@ async function createDatabase() {
     driver: sqlite3.Database,
   });
 
+  const tableInfo = await db.all("PRAGMA table_info(lyrics);");
+  const hasLegacyIndexColumn = tableInfo.some(
+    (column) => column.name === "index",
+  );
+
+  if (hasLegacyIndexColumn) {
+    await db.exec("BEGIN TRANSACTION;");
+    try {
+      await db.exec(`
+        CREATE TABLE IF NOT EXISTS lyrics_new (
+          spotifyTrackId TEXT PRIMARY KEY,
+          syncedlyricsstr TEXT NOT NULL,
+          isRomanization INTEGER NOT NULL,
+          syncedaltlyricsstr TEXT NOT NULL
+        );
+      `);
+
+      await db.exec(`
+        INSERT OR REPLACE INTO lyrics_new (spotifyTrackId, syncedlyricsstr, isRomanization, syncedaltlyricsstr)
+        SELECT spotifyTrackId, syncedlyricsstr, isRomanization, syncedaltlyricsstr
+        FROM lyrics;
+      `);
+
+      await db.exec("DROP TABLE lyrics;");
+      await db.exec("ALTER TABLE lyrics_new RENAME TO lyrics;");
+      await db.exec("COMMIT;");
+    } catch (error) {
+      await db.exec("ROLLBACK;");
+      throw error;
+    }
+  }
+
   await db.exec(`
-    CREATE TABLE IF NOT EXISTS lyrics_cache (
+    CREATE TABLE IF NOT EXISTS lyrics (
       spotifyTrackId TEXT PRIMARY KEY,
-      artistName TEXT NOT NULL,
-      albumName TEXT NOT NULL,
-      songName TEXT NOT NULL,
-      syncedLyricsString TEXT
+      syncedlyricsstr TEXT NOT NULL,
+      isRomanization INTEGER NOT NULL,
+      syncedaltlyricsstr TEXT NOT NULL
     );
   `);
 
   await db.exec(`
-    CREATE INDEX IF NOT EXISTS idx_lyrics_cache_spotifyTrackId
-    ON lyrics_cache (spotifyTrackId);
+    CREATE INDEX IF NOT EXISTS idx_lyrics_spotifyTrackId
+    ON lyrics (spotifyTrackId);
   `);
 
   return db;
 }
 
-function nonEmptyString(value) {
+function isNonEmptyString(value) {
   return typeof value === "string" && value.trim().length > 0;
 }
 
-function extractSyncedLyrics(payload) {
-  if (!payload || typeof payload !== "object") {
-    return null;
+function validateLyricsPayload(lyrics) {
+  if (!lyrics || typeof lyrics !== "object") {
+    return "Request body must include a lyrics object";
   }
 
-  const syncedLyrics = payload.syncedLyrics ?? payload.syncedlyrics ?? null;
-  if (!nonEmptyString(syncedLyrics)) {
-    return null;
+  if (!isNonEmptyString(lyrics.spotifyTrackId)) {
+    return "lyrics.spotifyTrackId must be a non-empty string";
   }
 
-  return syncedLyrics;
-}
-
-function hasNoLyrics(payload) {
-  if (!payload || typeof payload !== "object") {
-    return true;
+  if (typeof lyrics.syncedlyricsstr !== "string") {
+    return "lyrics.syncedlyricsstr must be a string";
   }
 
-  const syncedLyrics = payload.syncedLyrics ?? payload.syncedlyrics ?? null;
-  const plainLyrics = payload.plainLyrics ?? payload.plainlyrics ?? null;
-
-  const hasSynced = nonEmptyString(syncedLyrics);
-  const hasPlain = nonEmptyString(plainLyrics);
-
-  return !hasSynced && !hasPlain;
-}
-
-async function fetchFromLrclib({ artistName, songName, albumName }) {
-  const url = new URL("https://lrclib.net/api/get");
-  url.searchParams.set("artist_name", artistName);
-  url.searchParams.set("track_name", songName);
-  url.searchParams.set("album_name", albumName);
-
-  let response;
-  try {
-    response = await fetch(url);
-  } catch {
-    return { payload: null, failed: true };
+  if (typeof lyrics.isRomanization !== "boolean") {
+    return "lyrics.isRomanization must be a boolean";
   }
 
-  if (!response.ok) {
-    return { payload: null, failed: true };
+  if (typeof lyrics.syncedaltlyricsstr !== "string") {
+    return "lyrics.syncedaltlyricsstr must be a string";
   }
 
-  try {
-    const payload = await response.json();
-    return { payload, failed: false };
-  } catch {
-    return { payload: null, failed: true };
-  }
-}
-
-async function upsertLyrics(
-  db,
-  { spotifyTrackId, artistName, albumName, songName, syncedLyricsString },
-) {
-  await db.run(
-    `
-      INSERT INTO lyrics_cache (spotifyTrackId, artistName, albumName, songName, syncedLyricsString)
-      VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT(spotifyTrackId) DO UPDATE SET
-        artistName = excluded.artistName,
-        albumName = excluded.albumName,
-        songName = excluded.songName,
-        syncedLyricsString = excluded.syncedLyricsString
-    `,
-    [spotifyTrackId, artistName, albumName, songName, syncedLyricsString],
-  );
+  return null;
 }
 
 async function createServer() {
   const app = express();
   const db = await createDatabase();
 
+  app.use(express.json());
+
   app.get("/health", (_req, res) => {
     res.json({ ok: true });
   });
 
-  // Dedicated fetch and cache endpoint
-  app.get("/lyrics/fetch", async (req, res) => {
-    const spotifyTrackId = String(req.query.spotifyTrackId || "").trim();
-    const artistNames = String(req.query.artistNames || "").trim();
-    const songName = String(req.query.songName || "").trim();
-    const albumName = String(req.query.albumName || "").trim();
+  app.post("/lyrics", async (req, res) => {
+    const lyrics = req.body?.lyrics;
+    const validationError = validateLyricsPayload(lyrics);
 
-    if (!spotifyTrackId || !artistNames || !songName || !albumName) {
-      return res.status(400).json({
-        error:
-          "Missing required query params: spotifyTrackId, artistNames, songName, albumName",
-      });
+    if (validationError) {
+      return res.status(400).json({ error: validationError });
     }
 
+    const spotifyTrackId = lyrics.spotifyTrackId.trim();
+
     try {
-      const firstTry = await fetchFromLrclib({
-        artistName: artistNames,
-        songName,
-        albumName,
-      });
+      const existing = await db.get(
+        "SELECT spotifyTrackId FROM lyrics WHERE spotifyTrackId = ?",
+        [spotifyTrackId],
+      );
 
-      const firstTrySynced = extractSyncedLyrics(firstTry.payload);
-      if (firstTrySynced) {
-        await upsertLyrics(db, {
+      if (existing) {
+        return res.status(200).json({
+          message: "Lyrics already exist for this spotifyTrackId",
           spotifyTrackId,
-          artistName: artistNames,
-          albumName,
-          songName,
-          syncedLyricsString: firstTrySynced,
-        });
-
-        return res.json({
-          source: "lrclib",
-          fallbackUsed: false,
-          data: {
-            spotifyTrackId,
-            artistName: artistNames,
-            albumName,
-            songName,
-            syncedLyricsString: firstTrySynced,
-          },
         });
       }
 
-      const firstTryHasNoLyrics = hasNoLyrics(firstTry.payload);
-      const shouldTryFallbackArtist =
-        artistNames.includes(",") && (firstTry.failed || firstTryHasNoLyrics);
+      await db.run(
+        `
+          INSERT INTO lyrics (spotifyTrackId, syncedlyricsstr, isRomanization, syncedaltlyricsstr)
+          VALUES (?, ?, ?, ?)
+        `,
+        [
+          spotifyTrackId,
+          lyrics.syncedlyricsstr,
+          lyrics.isRomanization ? 1 : 0,
+          lyrics.syncedaltlyricsstr,
+        ],
+      );
 
-      if (shouldTryFallbackArtist) {
-        const firstArtist = artistNames.split(",")[0].trim();
-        if (firstArtist) {
-          const secondTry = await fetchFromLrclib({
-            artistName: firstArtist,
-            songName,
-            albumName,
-          });
-
-          const secondTrySynced = extractSyncedLyrics(secondTry.payload);
-          if (secondTrySynced) {
-            await upsertLyrics(db, {
-              spotifyTrackId,
-              artistName: artistNames,
-              albumName,
-              songName,
-              syncedLyricsString: secondTrySynced,
-            });
-
-            return res.json({
-              source: "lrclib",
-              fallbackUsed: true,
-              data: {
-                spotifyTrackId,
-                artistName: artistNames,
-                albumName,
-                songName,
-                syncedLyricsString: secondTrySynced,
-              },
-            });
-          }
-        }
-      }
-
-      return res.status(404).json({
-        source: "lrclib",
-        message: "No synced lyrics found",
+      return res.status(201).json({
+        message: "Lyrics created",
+        lyrics: {
+          spotifyTrackId,
+          syncedlyricsstr: lyrics.syncedlyricsstr,
+          isRomanization: lyrics.isRomanization,
+          syncedaltlyricsstr: lyrics.syncedaltlyricsstr,
+        },
       });
     } catch (error) {
       return res.status(500).json({
@@ -206,47 +152,41 @@ async function createServer() {
     }
   });
 
-  // Main lyrics endpoint that checks cache and calls the fetch endpoint if needed
   app.get("/lyrics", async (req, res) => {
-    const spotifyTrackId = String(req.query.spotifyTrackId || "").trim();
-    const artistNames = String(req.query.artistNames || "").trim();
-    const songName = String(req.query.songName || "").trim();
-    const albumName = String(req.query.albumName || "").trim();
+    const spotifyTrackId = String(
+      req.query.spotifyTrackId ?? req.query.spotifytrackid ?? "",
+    ).trim();
 
-    if (!spotifyTrackId || !artistNames || !songName || !albumName) {
+    if (!spotifyTrackId) {
       return res.status(400).json({
-        error:
-          "Missing required query params: spotifyTrackId, artistNames, songName, albumName",
+        error: "Missing required query param: spotifyTrackId",
       });
     }
 
     try {
-      // 1. Check local SQLite cache first
-      const existing = await db.get(
-        "SELECT syncedLyricsString FROM lyrics_cache WHERE spotifyTrackId = ?",
+      const row = await db.get(
+        `
+          SELECT spotifyTrackId, syncedlyricsstr, isRomanization, syncedaltlyricsstr
+          FROM lyrics
+          WHERE spotifyTrackId = ?
+        `,
         [spotifyTrackId],
       );
 
-      if (existing) {
-        return res.json({
-          syncedLyrics: existing.syncedLyricsString,
+      if (!row) {
+        return res.status(404).json({
+          error: "Lyrics not found",
         });
       }
 
-      // 2. Cache miss: Call the separate fetch endpoint internally
-      // Adjust the base URL/port if your server runs on a different port or host
-      const protocol = req.protocol;
-      const host = req.get("host");
-      const fetchUrl = `${protocol}://${host}/lyrics/fetch?spotifyTrackId=${encodeURIComponent(spotifyTrackId)}&artistNames=${encodeURIComponent(artistNames)}&songName=${encodeURIComponent(songName)}&albumName=${encodeURIComponent(albumName)}`;
-
-      const fetchResponse = await fetch(fetchUrl);
-      const fetchData = await fetchResponse.json();
-
-      if (!fetchResponse.ok) {
-        return res.status(fetchResponse.status).json(fetchData);
-      }
-
-      return res.json(fetchData);
+      return res.status(200).json({
+        lyrics: {
+          spotifyTrackId: row.spotifyTrackId,
+          syncedlyricsstr: row.syncedlyricsstr,
+          isRomanization: Boolean(row.isRomanization),
+          syncedaltlyricsstr: row.syncedaltlyricsstr,
+        },
+      });
     } catch (error) {
       return res.status(500).json({
         error: "Internal server error",
