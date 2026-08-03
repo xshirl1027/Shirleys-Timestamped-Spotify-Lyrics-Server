@@ -137,12 +137,7 @@ async function createServer() {
 
       return res.status(201).json({
         message: "Lyrics created",
-        lyrics: {
-          spotifyTrackId,
-          syncedlyricsstr: lyrics.syncedlyricsstr,
-          isRomanization: lyrics.isRomanization,
-          syncedaltlyricsstr: lyrics.syncedaltlyricsstr,
-        },
+        spotifyTrackId,
       });
     } catch (error) {
       return res.status(500).json({
@@ -180,12 +175,10 @@ async function createServer() {
       }
 
       return res.status(200).json({
-        lyrics: {
-          spotifyTrackId: row.spotifyTrackId,
-          syncedlyricsstr: row.syncedlyricsstr,
-          isRomanization: Boolean(row.isRomanization),
-          syncedaltlyricsstr: row.syncedaltlyricsstr,
-        },
+        spotifyTrackId: row.spotifyTrackId,
+        syncedlyricsstr: row.syncedlyricsstr,
+        isRomanization: Boolean(row.isRomanization),
+        syncedaltlyricsstr: row.syncedaltlyricsstr,
       });
     } catch (error) {
       return res.status(500).json({
