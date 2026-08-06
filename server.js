@@ -37,9 +37,9 @@ async function createDatabase() {
         CREATE TABLE IF NOT EXISTS lyrics_new (
           spotifyTrackId TEXT PRIMARY KEY,
           syncedlyricsstr TEXT NOT NULL,
-          isRomanization INTEGER NOT NULL,
-          syncedaltlyricsstr TEXT NOT NULL,
-          isOriginalLyricsEnglish INTEGER NOT NULL DEFAULT 0,
+          isRomanization INTEGER ,
+          syncedaltlyricsstr TEXT ,
+          isOriginalLyricsEnglish INTEGER,
           language TEXT
         );
       `);
@@ -226,6 +226,83 @@ async function createServer() {
         syncedaltlyricsstr: row.syncedaltlyricsstr,
         isOriginalLyricsEnglish: Boolean(row.isOriginalLyricsEnglish),
         language: row.language,
+      });
+    } catch (error) {
+      return res.status(500).json({
+        error: "Internal server error",
+        details: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  app.patch("/lyrics", async (req, res) => {
+    const {
+      spotifyTrackId,
+      syncedlyricsstr,
+      isRomanization,
+      syncedaltlyricsstr,
+      isOriginalLyricsEnglish,
+      language,
+    } = req.body;
+
+    const updates = [];
+    const values = [];
+
+    if (Object.prototype.hasOwnProperty.call(req.body, "syncedlyricsstr")) {
+      updates.push("syncedlyricsstr = ?");
+      values.push(syncedlyricsstr);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, "isRomanization")) {
+      updates.push("isRomanization = ?");
+      values.push(isRomanization ? 1 : 0);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, "syncedaltlyricsstr")) {
+      updates.push("syncedaltlyricsstr = ?");
+      values.push(syncedaltlyricsstr);
+    }
+
+    if (
+      Object.prototype.hasOwnProperty.call(req.body, "isOriginalLyricsEnglish")
+    ) {
+      updates.push("isOriginalLyricsEnglish = ?");
+      values.push(isOriginalLyricsEnglish ? 1 : 0);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, "language")) {
+      updates.push("language = ?");
+      values.push(language);
+    }
+
+    if (updates.length === 0) {
+      return res.status(200).json({
+        message: "No fields to update",
+        spotifyTrackId,
+      });
+    }
+
+    values.push(spotifyTrackId);
+
+    try {
+      const result = await db.run(
+        `
+          UPDATE lyrics
+          SET ${updates.join(", ")}
+          WHERE spotifyTrackId = ?
+        `,
+        values,
+      );
+
+      if (result.changes === 0) {
+        return res.status(404).json({
+          error: "Lyrics not found",
+        });
+      }
+
+      return res.status(200).json({
+        message: "Lyrics updated",
+        spotifyTrackId,
       });
     } catch (error) {
       return res.status(500).json({
