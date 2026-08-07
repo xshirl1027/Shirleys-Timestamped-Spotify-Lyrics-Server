@@ -36,17 +36,17 @@ async function createDatabase() {
       await db.exec(`
         CREATE TABLE IF NOT EXISTS lyrics_new (
           spotifyTrackId TEXT PRIMARY KEY,
-          syncedlyricsstr TEXT NOT NULL,
+          syncedLyricsStr TEXT NOT NULL,
           isRomanization INTEGER ,
-          syncedaltlyricsstr TEXT ,
+          syncedAltLyricsStr TEXT ,
           isOriginalLyricsEnglish INTEGER,
           language TEXT
         );
       `);
 
       await db.exec(`
-        INSERT OR REPLACE INTO lyrics_new (spotifyTrackId, syncedlyricsstr, isRomanization, syncedaltlyricsstr, isOriginalLyricsEnglish, language)
-        SELECT spotifyTrackId, syncedlyricsstr, isRomanization, syncedaltlyricsstr, ${hasLegacyOriginalLyricsEnglishColumn ? "COALESCE(isOriginalLyricsEnglish, 0)" : "0"}, ${hasLegacyLanguageColumn ? "language" : "NULL"}
+        INSERT OR REPLACE INTO lyrics_new (spotifyTrackId, syncedLyricsStr, isRomanization, syncedAltLyricsStr, isOriginalLyricsEnglish, language)
+        SELECT spotifyTrackId, syncedLyricsStr, isRomanization, syncedAltLyricsStr, ${hasLegacyOriginalLyricsEnglishColumn ? "COALESCE(isOriginalLyricsEnglish, 0)" : "0"}, ${hasLegacyLanguageColumn ? "language" : "NULL"}
         FROM lyrics;
       `);
 
@@ -62,9 +62,9 @@ async function createDatabase() {
   await db.exec(`
     CREATE TABLE IF NOT EXISTS lyrics (
       spotifyTrackId TEXT PRIMARY KEY,
-      syncedlyricsstr TEXT NOT NULL,
+      syncedLyricsStr TEXT NOT NULL,
       isRomanization INTEGER NOT NULL,
-      syncedaltlyricsstr TEXT NOT NULL,
+      syncedAltLyricsStr TEXT NOT NULL,
       isOriginalLyricsEnglish INTEGER NOT NULL DEFAULT 0,
       language TEXT
     );
@@ -109,26 +109,6 @@ function validateLyricsPayload(lyrics) {
     return "lyrics.spotifyTrackId must be a non-empty string";
   }
 
-  if (typeof lyrics.syncedlyricsstr !== "string") {
-    return "lyrics.syncedlyricsstr must be a string";
-  }
-
-  if (typeof lyrics.isRomanization !== "boolean") {
-    return "lyrics.isRomanization must be a boolean";
-  }
-
-  if (typeof lyrics.syncedaltlyricsstr !== "string") {
-    return "lyrics.syncedaltlyricsstr must be a string";
-  }
-
-  if (typeof lyrics.isOriginalLyricsEnglish !== "boolean") {
-    return "lyrics.isOriginalLyricsEnglish must be a boolean";
-  }
-
-  if (!(lyrics.language === null || typeof lyrics.language === "string")) {
-    return "lyrics.language must be a string or null";
-  }
-
   return null;
 }
 
@@ -144,12 +124,6 @@ async function createServer() {
 
   app.post("/lyrics", async (req, res) => {
     const lyrics = req.body;
-    // const validationError = validateLyricsPayload(lyrics);
-
-    // if (validationError) {
-    //   return res.status(400).json({ error: validationError });
-    // }
-
     const spotifyTrackId = lyrics.spotifyTrackId;
 
     try {
@@ -167,14 +141,14 @@ async function createServer() {
 
       await db.run(
         `
-          INSERT INTO lyrics (spotifyTrackId, syncedlyricsstr, isRomanization, syncedaltlyricsstr, isOriginalLyricsEnglish, language)
+          INSERT INTO lyrics (spotifyTrackId, syncedLyricsStr, isRomanization, syncedAltLyricsStr, isOriginalLyricsEnglish, language)
           VALUES (?, ?, ?, ?, ?, ?)
         `,
         [
           spotifyTrackId,
-          lyrics.syncedlyricsstr,
+          lyrics.syncedLyricsStr,
           lyrics.isRomanization ? 1 : 0,
-          lyrics.syncedaltlyricsstr,
+          lyrics.syncedAltLyricsStr,
           lyrics.isOriginalLyricsEnglish ? 1 : 0,
           lyrics.language,
         ],
@@ -206,7 +180,7 @@ async function createServer() {
     try {
       const row = await db.get(
         `
-          SELECT spotifyTrackId, syncedlyricsstr, isRomanization, syncedaltlyricsstr, isOriginalLyricsEnglish, language
+          SELECT spotifyTrackId, syncedLyricsStr, isRomanization, syncedAltLyricsStr, isOriginalLyricsEnglish, language
           FROM lyrics
           WHERE spotifyTrackId = ?
         `,
@@ -221,9 +195,9 @@ async function createServer() {
 
       return res.status(200).json({
         spotifyTrackId: row.spotifyTrackId,
-        syncedlyricsstr: row.syncedlyricsstr,
+        syncedLyricsStr: row.syncedLyricsStr,
         isRomanization: Boolean(row.isRomanization),
-        syncedaltlyricsstr: row.syncedaltlyricsstr,
+        syncedAltLyricsStr: row.syncedAltLyricsStr,
         isOriginalLyricsEnglish: Boolean(row.isOriginalLyricsEnglish),
         language: row.language,
       });
@@ -238,9 +212,9 @@ async function createServer() {
   app.patch("/lyrics", async (req, res) => {
     const {
       spotifyTrackId,
-      syncedlyricsstr,
+      syncedLyricsStr,
       isRomanization,
-      syncedaltlyricsstr,
+      syncedAltLyricsStr,
       isOriginalLyricsEnglish,
       language,
     } = req.body;
@@ -248,9 +222,9 @@ async function createServer() {
     const updates = [];
     const values = [];
 
-    if (Object.prototype.hasOwnProperty.call(req.body, "syncedlyricsstr")) {
-      updates.push("syncedlyricsstr = ?");
-      values.push(syncedlyricsstr);
+    if (Object.prototype.hasOwnProperty.call(req.body, "syncedLyricsStr")) {
+      updates.push("syncedLyricsStr = ?");
+      values.push(syncedLyricsStr);
     }
 
     if (Object.prototype.hasOwnProperty.call(req.body, "isRomanization")) {
@@ -258,9 +232,9 @@ async function createServer() {
       values.push(isRomanization ? 1 : 0);
     }
 
-    if (Object.prototype.hasOwnProperty.call(req.body, "syncedaltlyricsstr")) {
-      updates.push("syncedaltlyricsstr = ?");
-      values.push(syncedaltlyricsstr);
+    if (Object.prototype.hasOwnProperty.call(req.body, "syncedAltLyricsStr")) {
+      updates.push("syncedAltLyricsStr = ?");
+      values.push(syncedAltLyricsStr);
     }
 
     if (
