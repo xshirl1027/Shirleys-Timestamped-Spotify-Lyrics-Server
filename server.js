@@ -17,7 +17,7 @@ async function createDatabase() {
     (column) => column.name === "index",
   );
   const hasOriginalLyricsEnglishColumn = tableInfo.some(
-    (column) => column.name === "isOriginalLyricsEnglish",
+    (column) => column.name === "isOriginalLyricsLatin",
   );
   const hasLanguageColumn = tableInfo.some(
     (column) => column.name === "language",
@@ -25,7 +25,7 @@ async function createDatabase() {
 
   if (hasLegacyIndexColumn) {
     const hasLegacyOriginalLyricsEnglishColumn = tableInfo.some(
-      (column) => column.name === "isOriginalLyricsEnglish",
+      (column) => column.name === "isOriginalLyricsLatin",
     );
     const hasLegacyLanguageColumn = tableInfo.some(
       (column) => column.name === "language",
@@ -39,14 +39,14 @@ async function createDatabase() {
           syncedLyricsStr TEXT NOT NULL,
           isRomanization INTEGER ,
           syncedAltLyricsStr TEXT ,
-          isOriginalLyricsEnglish INTEGER,
+          isOriginalLyricsLatin INTEGER,
           language TEXT
         );
       `);
 
       await db.exec(`
-        INSERT OR REPLACE INTO lyrics_new (spotifyTrackId, syncedLyricsStr, isRomanization, syncedAltLyricsStr, isOriginalLyricsEnglish, language)
-        SELECT spotifyTrackId, syncedLyricsStr, isRomanization, syncedAltLyricsStr, ${hasLegacyOriginalLyricsEnglishColumn ? "COALESCE(isOriginalLyricsEnglish, 0)" : "0"}, ${hasLegacyLanguageColumn ? "language" : "NULL"}
+        INSERT OR REPLACE INTO lyrics_new (spotifyTrackId, syncedLyricsStr, isRomanization, syncedAltLyricsStr, isOriginalLyricsLatin, language)
+        SELECT spotifyTrackId, syncedLyricsStr, isRomanization, syncedAltLyricsStr, ${hasLegacyOriginalLyricsEnglishColumn ? "COALESCE(isOriginalLyricsLatin, 0)" : "0"}, ${hasLegacyLanguageColumn ? "language" : "NULL"}
         FROM lyrics;
       `);
 
@@ -65,7 +65,7 @@ async function createDatabase() {
       syncedLyricsStr TEXT NOT NULL,
       isRomanization INTEGER NOT NULL,
       syncedAltLyricsStr TEXT NOT NULL,
-      isOriginalLyricsEnglish INTEGER NOT NULL DEFAULT 0,
+      isOriginalLyricsLatin INTEGER NOT NULL DEFAULT 0,
       language TEXT
     );
   `);
@@ -77,7 +77,7 @@ async function createDatabase() {
   ) {
     await db.exec(`
       ALTER TABLE lyrics
-      ADD COLUMN isOriginalLyricsEnglish INTEGER NOT NULL DEFAULT 0;
+      ADD COLUMN isOriginalLyricsLatin INTEGER NOT NULL DEFAULT 0;
     `);
   }
 
@@ -141,7 +141,7 @@ async function createServer() {
 
       await db.run(
         `
-          INSERT INTO lyrics (spotifyTrackId, syncedLyricsStr, isRomanization, syncedAltLyricsStr, isOriginalLyricsEnglish, language)
+          INSERT INTO lyrics (spotifyTrackId, syncedLyricsStr, isRomanization, syncedAltLyricsStr, isOriginalLyricsLatin, language)
           VALUES (?, ?, ?, ?, ?, ?)
         `,
         [
@@ -149,7 +149,7 @@ async function createServer() {
           lyrics.syncedLyricsStr,
           lyrics.isRomanization ? 1 : 0,
           lyrics.syncedAltLyricsStr,
-          lyrics.isOriginalLyricsEnglish ? 1 : 0,
+          lyrics.isOriginalLyricsLatin ? 1 : 0,
           lyrics.language,
         ],
       );
@@ -180,7 +180,7 @@ async function createServer() {
     try {
       const row = await db.get(
         `
-          SELECT spotifyTrackId, syncedLyricsStr, isRomanization, syncedAltLyricsStr, isOriginalLyricsEnglish, language
+          SELECT spotifyTrackId, syncedLyricsStr, isRomanization, syncedAltLyricsStr, isOriginalLyricsLatin, language
           FROM lyrics
           WHERE spotifyTrackId = ?
         `,
@@ -198,7 +198,7 @@ async function createServer() {
         syncedLyricsStr: row.syncedLyricsStr,
         isRomanization: Boolean(row.isRomanization),
         syncedAltLyricsStr: row.syncedAltLyricsStr,
-        isOriginalLyricsEnglish: Boolean(row.isOriginalLyricsEnglish),
+        isOriginalLyricsLatin: Boolean(row.isOriginalLyricsLatin),
         language: row.language,
       });
     } catch (error) {
@@ -215,7 +215,7 @@ async function createServer() {
       syncedLyricsStr,
       isRomanization,
       syncedAltLyricsStr,
-      isOriginalLyricsEnglish,
+      isOriginalLyricsLatin,
       language,
     } = req.body;
 
@@ -238,10 +238,10 @@ async function createServer() {
     }
 
     if (
-      Object.prototype.hasOwnProperty.call(req.body, "isOriginalLyricsEnglish")
+      Object.prototype.hasOwnProperty.call(req.body, "isOriginalLyricsLatin")
     ) {
-      updates.push("isOriginalLyricsEnglish = ?");
-      values.push(isOriginalLyricsEnglish ? 1 : 0);
+      updates.push("isOriginalLyricsLatin = ?");
+      values.push(isOriginalLyricsLatin ? 1 : 0);
     }
 
     if (Object.prototype.hasOwnProperty.call(req.body, "language")) {
