@@ -63,9 +63,9 @@ async function createDatabase() {
     CREATE TABLE IF NOT EXISTS lyrics (
       spotifyTrackId TEXT PRIMARY KEY,
       syncedLyricsStr TEXT NOT NULL,
-      isRomanization INTEGER NOT NULL,
-      syncedAltLyricsStr TEXT NOT NULL,
-      isOriginalLyricsLatin INTEGER NOT NULL DEFAULT 0,
+      isRomanization INTEGER,
+      syncedAltLyricsStr TEXT,
+      isOriginalLyricsLatin INTEGER,
       language TEXT
     );
   `);
