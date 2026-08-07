@@ -143,14 +143,14 @@ async function createServer() {
   });
 
   app.post("/lyrics", async (req, res) => {
-    const lyrics = req.body?.lyrics;
-    const validationError = validateLyricsPayload(lyrics);
+    const lyrics = req.body;
+    // const validationError = validateLyricsPayload(lyrics);
 
-    if (validationError) {
-      return res.status(400).json({ error: validationError });
-    }
+    // if (validationError) {
+    //   return res.status(400).json({ error: validationError });
+    // }
 
-    const spotifyTrackId = lyrics.spotifyTrackId.trim();
+    const spotifyTrackId = lyrics.spotifyTrackId;
 
     try {
       const existing = await db.get(
